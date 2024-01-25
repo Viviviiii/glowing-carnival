@@ -1,0 +1,169 @@
+---
+title: "Bayesian MRF"
+author: "Vivi Yuan"
+date: "2023-12-10"
+output: html_document
+---
+## Frequentist GGM
+
+```{r,warning=FALSE,message=FALSE}
+setwd("/Users/ywxiu/Library/CloudStorage/OneDrive-UvA/thesis/R")
+library(bootnet)
+library(dplyr)
+library(EGAnet)
+library(qgraph)
+
+
+# Import data
+#dataset is shared on OSF: data.csv
+Data <- read.csv2("data.csv",header=T)
+Data <- filter(Data, sample == "fr"| sample == "en")
+DataFrench <- filter(Data, sample == "fr")
+Data <- select(DataFrench,  SBPS1, SBPS2, SBPS3, SBPS4, SBPS5, SBPS6, SBPS7, SBPS8,CEIII1E, CEIII2C, CEIII3E, CEIII4C, CEIII5E, CEIII6C, CEIII7E, CEIII8C, CEIII9E, CEIII10C)
+
+n1 <- EGA(data = Data, model = "glasso", plot.EGA=TRUE)
+print(n1)
+
+boot.n1 <- bootEGA(data = Data, iter = 1000, typicalStructure = TRUE,
+                    plot.typicalStructure = TRUE, model = "glasso", plot.type = "qgraph",
+                    type = "parametric", ncores = 2, seed = 1000)
+
+# item and dimension stability
+itemStability(boot.n1)
+dimensionStability(boot.n1)
+
+EGA.fit(
+  data = Data,
+  n = NULL,
+  uni.method = c("expand", "LE"),
+  corr = c("cor_auto", "pearson", "spearman"),
+  model = c("glasso", "TMFG"),
+  steps = c(3, 4, 5, 6, 7, 8)
+)
+
+gr<-list('Boredom'=c(1:8),'Curiosity'=c(10,12,14,16,18),'Exploration'= c(9,11,13,15,17))
+n1<-estimateNetwork(Data, default= "EBICglasso")
+plot(n1, layout = "spring", groups=gr,
+             layoutScale = c(1,1), palette = "colorblind",
+             theme = "TeamFortress", vsize = 8,legend.cex=0.5)
+
+
+
+```
+
+
+
+
+
+## Bayesian MRF
+```{r}
+#Set Working Directory
+setwd("/Users/ywxiu/Library/CloudStorage/OneDrive-UvA/thesis/R")
+
+#Load the necessary packages
+library(easybgm)
+library(bgms)
+library(dplyr)
+
+#import data
+Data <- read.csv2("data.csv",header=T)
+Data <- Data[c(1:490),c(6:13,15:24)]
+data <- as.matrix(Data)
+
+
+
+#Model fit with easybgm
+MRF_fit <- easybgm::easybgm(data = data, 
+                            type = "ordinal", 
+                            package = "bgms", 
+                            interaction_prior="UnitInfo",
+                            edge_prior= "Bernoulli",
+                            iter = 1e5, 
+                            save = TRUE,
+                            centrality = TRUE)
+MRF_fit0 <- easybgm::easybgm(data = data, 
+                            type = "ordinal", 
+                            package = "bgms", 
+                            interaction_prior="UnitInfo",
+                            edge_prior= "Bernoulli",
+                            iter = 1e5, 
+                            save = FALSE,
+                            centrality = TRUE)
+#summary output
+summary(MRF_fit)
+#Summary method for easybgm objects
+summary(MRF_fit, evidence_thresh = 10)
+
+
+# =========================
+#  DATA VISUALISATION
+# =========================
+
+# 0. Plot posterior structure estimates 
+
+# 0.a Posterior structure probability
+#Plot Posterior Structure Probabilities
+easybgm::plot_structure_probabilities(MRF_fit)
+
+# 0.b. Posterior complexity probability
+easybgm::plot_complexity_probabilities(MRF_fit) 
+
+complexity <- c()
+for(i in 1:length(MRF_fit$sample_graph)){
+  complexity[i] <- sum(as.numeric(unlist(strsplit(MRF_fit$sample_graph[i], ""))))
+}
+
+data_complexity <- cbind(complexity, MRF_fit$graph_weights) %>%
+  as_tibble() %>% 
+  group_by(complexity) %>% 
+  summarise(complexity_weight = sum(V2))
+
+data_complexity$complexity
+data_complexity$complexity_weight
+
+
+# 1. Plot structure
+#generate 3 groups in plot
+generate_sequence <- function() {
+  sequence <- character(0)
+  for (i in 1:10) {
+    if (i %% 2 == 0) {
+      sequence <- c(sequence, "Curiosity")
+    } else {
+      sequence <- c(sequence, "Exploration")
+    }
+  }
+  return(sequence)
+}
+result <- generate_sequence()
+Groups <- c(rep("Boredom Proneness", 8), result)
+
+easybgm::plot_structure(MRF_fit, layoutScale = c(.8,1), palette = "colorblind",legend = F, groups = Groups,
+               theme = "TeamFortress", vsize = 6, edge.width = .3, layout = "spring")
+
+
+# 2. Plot network model (also referred to as median probability model)
+# set two plots with the same layout.
+Layout <- qgraph::averageLayout(n1)
+easybgm::plot_network(MRF_fit, layout = Layout, groups=Groups,legend=F,
+             layoutScale = c(1,1), palette = "colorblind",
+             theme = "TeamFortress", vsize = 8,evidence_thresh = 10,dashed = TRUE)
+
+# 3. Plot evidence plot
+easybgm::plot_edgeevidence(MRF_fit, split = T,edge.width = 2,evidence_thresh = 10,groups=Groups,legend=F,palette = "colorblind",layout=Layout)
+
+
+# 4. Plot parameter forest plot  
+easybgm::plot_parameterHDI(MRF_fit)
+
+
+# 5. Plot strength centrality estimate and 95% highest density interval 
+easybgm::plot_centrality(MRF_fit) 
+
+
+
+
+```
+
+
+
